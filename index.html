@@ -1,0 +1,261 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>La chérie</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #050505;
+  color: #00ff99;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 100vh;
+  font-family: monospace;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+#info {
+  color: #aaa;
+  font-size: 11px;
+  text-align: center;
+  padding: 8px 12px 4px;
+  letter-spacing: 0.3px;
+}
+#screen-wrap {
+  width: 100%;
+  overflow: hidden;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+pre {
+  font-size: 7px;
+  line-height: 1.05;
+  color: #00ff99;
+  white-space: pre;
+  padding: 4px;
+}
+#controls {
+  display: flex;
+  gap: 12px;
+  padding: 10px 16px 16px;
+  width: 100%;
+  justify-content: center;
+}
+.btn {
+  flex: 1;
+  max-width: 140px;
+  height: 56px;
+  background: #111;
+  border: 1px solid #00ff9966;
+  border-radius: 12px;
+  color: #00ff99;
+  font-family: monospace;
+  font-size: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active { background: #00ff9922; }
+#btn-space {
+  background: #0a1a0a;
+  border-color: #00ff99;
+  font-size: 13px;
+  color: #00ff99;
+  display: none;
+}
+#btn-space.visible { display: flex; }
+</style>
+</head>
+<body>
+
+<div id="info">← → pour marcher · double tap pour la scène finale</div>
+
+<div id="screen-wrap">
+  <pre id="screen"></pre>
+</div>
+
+<div id="controls">
+  <button class="btn" id="btn-left" aria-label="Gauche">←</button>
+  <button class="btn" id="btn-space" id="btn-space" aria-label="Scène finale">❤️ Bisou ❤️</button>
+  <button class="btn" id="btn-right" aria-label="Droite">→</button>
+</div>
+
+<script>
+const width = 80;
+const height = 26;
+
+let player = 0;
+const goal = 300;
+let walkFrame = 0;
+let finalScene = false;
+const myHouse = "Chez Yann";
+
+const btnLeft = document.getElementById('btn-left');
+const btnRight = document.getElementById('btn-right');
+const btnSpace = document.getElementById('btn-space');
+
+function moveRight() {
+  if (finalScene) return;
+  player++;
+  walkFrame++;
+  render();
+}
+function moveLeft() {
+  if (finalScene) return;
+  player = Math.max(0, player - 1);
+  walkFrame++;
+  render();
+}
+function doSpace() {
+  if (finalScene) return;
+  if (player >= goal) {
+    finalScene = true;
+    render();
+  }
+}
+
+btnLeft.addEventListener('pointerdown', e => { e.preventDefault(); moveLeft(); });
+btnRight.addEventListener('pointerdown', e => { e.preventDefault(); moveRight(); });
+btnSpace.addEventListener('pointerdown', e => { e.preventDefault(); doSpace(); });
+
+let holdInterval = null;
+function startHold(fn) {
+  fn();
+  holdInterval = setInterval(fn, 80);
+}
+function stopHold() {
+  clearInterval(holdInterval);
+  holdInterval = null;
+}
+
+btnLeft.addEventListener('pointerdown', () => startHold(moveLeft));
+btnLeft.addEventListener('pointerup', stopHold);
+btnLeft.addEventListener('pointerleave', stopHold);
+btnRight.addEventListener('pointerdown', () => startHold(moveRight));
+btnRight.addEventListener('pointerup', stopHold);
+btnRight.addEventListener('pointerleave', stopHold);
+
+document.addEventListener('keydown', e => {
+  if (finalScene) return;
+  if (e.key === 'ArrowRight') { moveRight(); }
+  if (e.key === 'ArrowLeft') { moveLeft(); }
+  if (e.code === 'Space' && player >= goal) { finalScene = true; render(); }
+});
+
+const catGirl1 = [" /\\_/\\\\", "( ^.^ )", " /🎀\\\\ "];
+const catGirl2 = [" /\\_/\\\\", "( o.o )", " /🎀\\\\ "];
+const catBoy   = [" /\\_/\\\\", "( -.- )", " > ^ >"];
+
+function put(grid, sprite, x, y) {
+  for (let yy = 0; yy < sprite.length; yy++) {
+    for (let xx = 0; xx < sprite[yy].length; xx++) {
+      const px = x + xx, py = y + yy;
+      if (px >= 0 && px < width && py >= 0 && py < height) {
+        grid[py][px] = sprite[yy][xx];
+      }
+    }
+  }
+}
+
+function text(grid, x, y, value) {
+  for (let i = 0; i < value.length; i++) {
+    if (x + i < width) grid[y][x + i] = value[i];
+  }
+}
+
+function heartsExplosion(grid) {
+  const hearts = [[15,4],[20,7],[27,3],[38,6],[46,4],[54,7],[60,3],[68,5]];
+  for (const h of hearts) grid[h[1]][h[0]] = "♥";
+}
+
+function render() {
+  let grid = [];
+  for (let y = 0; y < height; y++) grid.push(Array(width).fill(" "));
+
+  if (finalScene) {
+    heartsExplosion(grid);
+    const end = [
+      "",
+      "    ♥♥♥      ♥♥♥",
+      " ♥♥♥♥♥♥♥  ♥♥♥♥♥♥♥",
+      "♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥",
+      " ♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥",
+      "   ♥♥♥♥♥♥♥♥♥♥♥",
+      "     ♥♥♥♥♥♥♥",
+      "       ♥♥♥♥",
+      "         ♥",
+      "",
+      "  /\\_/\\\\     /\\_/\\\\",
+      " ( ^.^ )   ( -.- )",
+      " /🎀\\\\      > ^ >",
+      "",
+      " Bonne journée chérie ❤️",
+      "",
+      " Bisoooooous <3",
+    ];
+    for (let y = 0; y < end.length; y++) text(grid, 12, 1 + y, end[y]);
+    document.getElementById("screen").textContent = grid.map(r => r.join("")).join("\n");
+    btnSpace.classList.remove('visible');
+    return;
+  }
+
+  const ground = height - 4;
+  for (let x = 0; x < width; x++) grid[ground][x] = "=";
+
+  for (let i = -20; i < 500; i += 18) {
+    const wx = i - player + 16;
+    if (wx > 0 && wx < width) {
+      grid[ground - 6][wx] = "O";
+      grid[ground - 5][wx] = "|";
+      grid[ground - 4][wx] = "|";
+      grid[ground - 3][wx] = "|";
+    }
+  }
+
+  const housePos = goal - player + 28;
+  if (housePos > 0 && housePos < width - 16) {
+    const house = [
+      "     /\\\\     ",
+      "    /  \\\\    ",
+      "   /____\\\\   ",
+      "  | [] [] |  ",
+      "  |      |   ",
+      "  |______|   "
+    ];
+    for (let y = 0; y < house.length; y++)
+      for (let x = 0; x < house[y].length; x++)
+        grid[ground - 9 + y][housePos + x] = house[y][x];
+    text(grid, housePos, ground - 10, myHouse);
+  }
+
+  put(grid, walkFrame % 2 === 0 ? catGirl1 : catGirl2, 14, ground - 2);
+
+  if (player >= goal) {
+    put(grid, catBoy, 26, ground - 2);
+    text(grid, 16, 4, "❤️ Ton chéri est là ❤️");
+    text(grid, 18, 6, "Double tap !");
+    btnSpace.classList.add('visible');
+  } else {
+    btnSpace.classList.remove('visible');
+  }
+
+  text(grid, 1, 1, `Dist: ${player}m / ${goal}m`);
+
+  document.getElementById("screen").textContent = grid.map(r => r.join("")).join("\n");
+}
+
+render();
+</script>
+</body>
+</html>
