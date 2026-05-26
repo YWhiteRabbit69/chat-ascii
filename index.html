@@ -6,12 +6,7 @@
 <title>La chérie <3</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-
-html, body {
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-}
+html, body { height: 100%; width: 100%; overflow: hidden; }
 
 body {
   background: #050505;
@@ -23,14 +18,7 @@ body {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-}
-
-#info {
-  color: #555;
-  font-size: 11px;
-  text-align: center;
-  padding: 6px 12px 2px;
-  flex-shrink: 0;
+  transition: background 3s ease;
 }
 
 #screen-wrap {
@@ -77,7 +65,6 @@ pre {
   -webkit-tap-highlight-color: transparent;
   transition: background 0.08s;
 }
-
 .btn:active { background: #00ff9920; }
 
 #btn-space {
@@ -88,184 +75,479 @@ pre {
   flex: 2;
   max-width: 240px;
 }
-
 #btn-space.visible { display: flex; }
+
+@keyframes rise {
+  0%   { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(-80px); opacity: 0; }
+}
+.floating-heart {
+  position: fixed;
+  font-size: 22px;
+  pointer-events: none;
+  animation: rise 2.2s ease-out forwards;
+  z-index: 99;
+}
+
+#typewriter {
+  position: fixed;
+  bottom: 85px;
+  left: 0; right: 0;
+  text-align: center;
+  color: #00ff99;
+  font-family: monospace;
+  font-size: clamp(11px, 3vw, 15px);
+  padding: 0 20px;
+  display: none;
+  text-shadow: 0 0 8px #00ff99;
+  line-height: 1.8;
+  z-index: 50;
+}
 </style>
 </head>
 <body>
 
-<div id="info">← → pour marcher</div>
-
-<div id="screen-wrap">
-  <pre id="screen"></pre>
-</div>
+<div id="screen-wrap"><pre id="screen"></pre></div>
 
 <div id="controls">
-  <button class="btn" id="btn-left" aria-label="Gauche">←</button>
-  <button class="btn" id="btn-space" aria-label="Scène finale">❤️ Bisou ❤️</button>
-  <button class="btn" id="btn-right" aria-label="Droite">→</button>
+  <button class="btn" id="btn-left">←</button>
+  <button class="btn" id="btn-space">❤️ Bisou ❤️</button>
+  <button class="btn" id="btn-right">→</button>
 </div>
 
+<div id="typewriter"></div>
+
 <script>
-const width = 80;
-const height = 24;
+const W = 80, H = 24, GOAL = 100, HOUSE = "Chez Yann";
 
-let player = 0;
-const goal = 200;
-let walkFrame = 0;
-let finalScene = false;
-const myHouse = "Chez Yann";
+let player = 0, walkFrame = 0, idleFrame = 0, idleTimer = 0;
+let finalScene = false, approachAnim = false, boyX = 60;
 
-const btnLeft  = document.getElementById('btn-left');
-const btnRight = document.getElementById('btn-right');
-const btnSpace = document.getElementById('btn-space');
+// Nuages
+const clouds = [
+  {x:8,  y:2, sp:0.04},
+  {x:33, y:4, sp:0.025},
+  {x:58, y:1, sp:0.03},
+  {x:72, y:3, sp:0.018},
+];
 
-function moveRight() {
+// Étoiles
+const STARS = Array.from({length:20}, (_,i) => ({
+  x: (i*13+7) % W,
+  y: Math.floor((i*7+2) % 8),
+  ch: i%3===0 ? "*" : ".",
+  tw: i%2===0
+}));
+
+// ── AUDIO ──────────────────────────────────────────────────
+let actx = null;
+function ac() {
+  if (!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
+  return actx;
+}
+function beep(freq, dur, vol=0.07, type="triangle") {
+  try {
+    const c=ac(), o=c.createOscillator(), g=c.createGain();
+    o.connect(g); g.connect(c.destination);
+    o.type=type; o.frequency.value=freq;
+    const t=c.currentTime;
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.linearRampToValueAtTime(vol, t+0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+    o.start(); o.stop(t+dur);
+  } catch(e){}
+}
+
+// ── MÉLODIE DES PAS (partition, 120 BPM) ───────────────────
+// Fréquences (Hz) : G3=196 A3=220 B3=247 C4=262 D4=294 Eb4=311 E4=330 G4=392 A4=440 Bb4=466
+// null = silence (pause, pas d'avance)
+// dur en ms : noire=500ms, croche=250ms, double-croche=125ms
+const MELODY = [
+  // Mesure 1 : G3 A3 B3 D4  (noires)
+  {f:196, ms:500}, {f:220, ms:500}, {f:247, ms:500}, {f:294, ms:500},
+  // Mesure 2 : G3 A3 B3 D4  (répétition)
+  {f:196, ms:500}, {f:220, ms:500}, {f:247, ms:500}, {f:294, ms:500},
+  // Mesure 3 : G3 E4 Eb4 D4 C4 B3 Bb3  (croches + une double-croche)
+  {f:196, ms:250}, {f:330, ms:250}, {f:311, ms:125}, {f:294, ms:125},
+  {f:262, ms:250}, {f:247, ms:250}, {f:233, ms:500},
+  // Mesure 4 : B3 D4 E4 G4 Bb4 A4 G4  (croches)
+  {f:247, ms:250}, {f:294, ms:250}, {f:330, ms:250}, {f:392, ms:250},
+  {f:466, ms:250}, {f:440, ms:250}, {f:392, ms:500},
+];
+
+let melIdx = 0;        // position dans la mélodie
+let melTimeout = null; // timeout en cours
+let isWalking = false; // bouton maintenu ?
+
+function stopMelody() {
+  isWalking = false;
+  if (melTimeout) { clearTimeout(melTimeout); melTimeout = null; }
+}
+
+function scheduleNextNote() {
+  if (!isWalking || finalScene) { stopMelody(); return; }
+  const note = MELODY[melIdx % MELODY.length];
+  melIdx++;
+
+  // Joue la note et avance d'un pas
+  beep(note.f, note.ms / 1000 * 0.85, 0.07, "triangle");
+  moveStep();
+
+  melTimeout = setTimeout(scheduleNextNote, note.ms);
+}
+
+function startMelody() {
+  if (isWalking || finalScene) return;
+  isWalking = true;
+  scheduleNextNote();
+}
+
+// ── PAS (appelé par la mélodie) ────────────────────────────
+function moveStep() {
   if (finalScene) return;
-  player++;
-  walkFrame++;
-  render();
-}
-function moveLeft() {
-  if (finalScene) return;
-  player = Math.max(0, player - 1);
-  walkFrame++;
-  render();
-}
-function doSpace() {
-  if (finalScene || player < goal) return;
-  finalScene = true;
-  render();
+  player++; walkFrame++; idleTimer = 0;
 }
 
-// Maintien du doigt = marche continue
-let holdInterval = null;
-function startHold(fn) {
-  fn();
-  clearInterval(holdInterval);
-  holdInterval = setInterval(fn, 80);
+function playArrival() {
+  [392,440,494,523,587].forEach((n,i)=>setTimeout(()=>beep(n,0.18,0.09,"sine"),i*110));
 }
-function stopHold() {
-  clearInterval(holdInterval);
-  holdInterval = null;
+// ── ENJOY THE SILENCE – Depeche Mode (110 BPM, Eb majeur) ──
+// noire = 545ms, croche = 273ms, blanche = 1090ms
+// Fréquences Eb majeur :
+//   Eb3=156  Bb3=233  Ab3=208  Gb3=185  F3=175  C4=262
+//   Eb4=311  Db4=277  C4=262   Bb3=233  Ab3=208 Gb4=370  F4=349
+// Basse : Eb2=78  Bb2=116  Ab2=104  Bb2=116
+
+function beepAt(ctx, freq, startT, dur, vol=0.07, type="triangle") {
+  try {
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type=type; o.frequency.value=freq;
+    g.gain.setValueAtTime(0.0001, startT);
+    g.gain.linearRampToValueAtTime(vol, startT+0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, startT+dur*0.9);
+    o.start(startT); o.stop(startT+dur);
+  } catch(e){}
 }
 
-btnLeft.addEventListener('pointerdown',  e => { e.preventDefault(); startHold(moveLeft); });
-btnLeft.addEventListener('pointerup',    stopHold);
-btnLeft.addEventListener('pointerleave', stopHold);
+function playFinalJingle() {
+  const ctx = ac();
+  const now = ctx.currentTime;
+  const Q = 60/110;       // noire = 0.5454s
+  const H = Q/2;          // croche = 0.2727s
+  const W2 = Q*2;         // blanche = 1.0909s
+  const W4 = Q*4;         // ronde   = 2.1818s
 
-btnRight.addEventListener('pointerdown',  e => { e.preventDefault(); startHold(moveRight); });
-btnRight.addEventListener('pointerup',    stopHold);
-btnRight.addEventListener('pointerleave', stopHold);
+  // ── BASSE : Eb2 Bb2 Ab2 Bb2 en boucle (noires) ─────────
+  const bassLine = [78, 116, 104, 116];
+  const totalBeats = 32; // 8 mesures de 4 temps
+  for(let i=0; i<totalBeats; i++){
+    beepAt(ctx, bassLine[i%4], now + i*Q, Q*0.8, 0.055, "sawtooth");
+  }
 
-btnSpace.addEventListener('pointerdown', e => { e.preventDefault(); doSpace(); });
+  // ── MÉLODIE : motif intro (mesures 1-4, répété 2x) ─────
+  // Motif principal repéré sur la partition (main droite, voix haute)
+  // Eb4 Db4 Bb3 | Eb4 Db4 Bb3 Ab3 | ...
+  const intro = [
+    // mes 1
+    {f:311,d:H},{f:277,d:H},{f:233,d:H},{f:311,d:H},{f:277,d:H},{f:233,d:H},{f:208,d:Q},
+    // mes 2 (idem)
+    {f:311,d:H},{f:277,d:H},{f:233,d:H},{f:311,d:H},{f:277,d:H},{f:233,d:H},{f:208,d:Q},
+    // mes 3
+    {f:311,d:H},{f:277,d:H},{f:233,d:H},{f:311,d:H},{f:277,d:H},{f:233,d:H},{f:208,d:Q},
+    // mes 4
+    {f:311,d:H},{f:277,d:H},{f:233,d:H},{f:311,d:H},{f:277,d:H},{f:233,d:H},{f:208,d:Q},
+  ];
+  let t=0;
+  for(const n of intro){
+    beepAt(ctx, n.f, now+t, n.d, 0.09, "triangle");
+    t+=n.d;
+  }
 
-// Support clavier
-document.addEventListener('keydown', e => {
-  if (finalScene) return;
-  if (e.key === 'ArrowRight') moveRight();
-  if (e.key === 'ArrowLeft')  moveLeft();
-  if (e.code === 'Space' && player >= goal) { finalScene = true; render(); }
-});
+  // ── LIGNE VOCALE : "Words like violence" (mes 9+) ──────
+  // Eb4  Db4  C4   Bb3  Ab3  Bb3  Eb4
+  // Eb4  Db4  C4   Bb3  Ab3 (tenu)
+  const vocal = [
+    {f:311,d:H*1.2}, // Words
+    {f:277,d:H*0.8}, // like
+    {f:262,d:H},     // vi-
+    {f:233,d:H},     // o-
+    {f:208,d:H},     // lence
+    {f:233,d:Q},     // (liaison)
+    {f:311,d:Q},     // break
+    {f:311,d:H},     // the
+    {f:277,d:H},     // si-
+    {f:262,d:H},     // lence
+    {f:233,d:W2},    // (tenu)
+  ];
+  const vocalStart = now + Q*16; // démarre mesure 5
+  let tv=0;
+  for(const n of vocal){
+    beepAt(ctx, n.f, vocalStart+tv, n.d, 0.10, "sine");
+    tv+=n.d;
+  }
+}
 
-const catGirl1 = [" /\\_/\\\\", "( ^.^ )", " /🎀\\\\ "];
-const catGirl2 = [" /\\_/\\\\", "( o.o )", " /🎀\\\\ "];
-const catBoy   = [" /\\_/\\\\", "( -.- )", " > ^ >"];
+// ── SPRITES ────────────────────────────────────────────────
+const GIRL = [
+  [" /\\_/\\\\","( ^.^ )"," /🎀\\\\ "],
+  [" /\\_/\\\\","( o.o )"," /🎀\\\\ "],
+];
+const GIRL_IDLE = [
+  [" /\\_/\\\\","( ^.^ )"," /🎀\\\\ "],
+  [" /\\_/\\\\","( >.< )"," /🎀\\\\ "],
+  [" /\\_/\\\\","( ^.^ )"," /🎀\\\\ "],
+  [" /\\_/\\\\","( u.u )"," /🎀\\\\ "],
+];
+const BOY = [" /\\_/\\\\","( -.- )"," > ^ >"];
 
-function put(grid, sprite, x, y) {
-  for (let yy = 0; yy < sprite.length; yy++)
-    for (let xx = 0; xx < sprite[yy].length; xx++) {
-      const px = x + xx, py = y + yy;
-      if (px >= 0 && px < width && py >= 0 && py < height)
-        grid[py][px] = sprite[yy][xx];
+// ── HELPERS ────────────────────────────────────────────────
+function mkgrid() { return Array.from({length:H},()=>Array(W).fill(" ")); }
+function put(g,spr,x,y) {
+  for(let yy=0;yy<spr.length;yy++)
+    for(let xx=0;xx<spr[yy].length;xx++){
+      const px=x+xx,py=y+yy;
+      if(px>=0&&px<W&&py>=0&&py<H) g[py][px]=spr[yy][xx];
     }
 }
-
-function text(grid, x, y, value) {
-  for (let i = 0; i < value.length; i++)
-    if (x + i < width) grid[y][x + i] = value[i];
+function tx(g,x,y,s) {
+  for(let i=0;i<s.length;i++)
+    if(x+i>=0&&x+i<W&&y>=0&&y<H) g[y][x+i]=s[i];
 }
 
-function heartsExplosion(grid) {
-  [[12,3],[18,6],[25,2],[36,5],[44,3],[52,6],[58,2],[66,4]]
-    .forEach(h => grid[h[1]][h[0]] = "♥");
+// ── CIEL ───────────────────────────────────────────────────
+function skyPct() { return Math.min(1, player/GOAL); }
+
+function applySky() {
+  const p=skyPct();
+  let r,g,b;
+  if(p<0.5){ const t=p*2; r=5+t*30; g=5+t*5; b=5+t*22; }
+  else      { const t=(p-.5)*2; r=35-t*28; g=10+t*8; b=27+t*8; }
+  document.body.style.background=`rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
 }
 
-function render() {
-  let grid = Array.from({length: height}, () => Array(width).fill(" "));
+function drawSky(grid) {
+  const p=skyPct();
+  // Lune (disparaît à l'aube)
+  if(p<0.65){
+    const mx=((W*0.75 - player*0.02)%W+W)%W|0;
+    tx(grid,mx,0,"(  )"); tx(grid,mx,1," °° ");
+  }
+  // Soleil qui monte
+  if(p>0.35){
+    const sp=(p-0.35)/0.65;
+    const sy=Math.floor(7-sp*7);
+    const sx=(W*0.18)|0;
+    if(sy>=0){ tx(grid,sx,sy,"\\o/"); if(sy+1<H) tx(grid,sx,sy+1," | "); }
+  }
+  // Étoiles
+  if(p<0.75){
+    const tick=Date.now()/600|0;
+    for(const s of STARS)
+      if(!s.tw||(tick%2===0)) tx(grid,s.x,s.y,s.ch);
+  }
+}
 
-  if (finalScene) {
-    heartsExplosion(grid);
-    const end = [
-      "",
-      "    ♥♥♥      ♥♥♥",
-      " ♥♥♥♥♥♥♥  ♥♥♥♥♥♥♥",
-      "♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥",
-      " ♥♥♥♥♥♥♥♥♥♥♥♥♥♥♥",
-      "   ♥♥♥♥♥♥♥♥♥♥♥",
-      "     ♥♥♥♥♥♥♥",
-      "       ♥♥♥♥",
-      "         ♥",
-      "",
-      "  /\\_/\\\\     /\\_/\\\\",
-      " ( ^.^ )   ( -.- )",
-      " /🎀\\\\      > ^ >",
-      "",
-      " Bonne journée chérie ❤️",
-      "",
-      " Bisoooooous <3",
+// ── NUAGES ─────────────────────────────────────────────────
+const CLOUD_SHAPES=[["(~~~)"," ~~~ "],["(~~~~)"," ~~~~ "],["(~)"," ~ "]];
+function drawClouds(grid) {
+  for(const c of clouds){
+    const cx=((c.x - player*c.sp*0.3)%W+W*2)%W|0;
+    const sh=CLOUD_SHAPES[(c.x*13|0)%CLOUD_SHAPES.length];
+    for(let i=0;i<sh.length;i++) tx(grid,(cx+W)%W,(c.y+i)|0,sh[i]);
+  }
+}
+
+// ── SOL ────────────────────────────────────────────────────
+const DECO=[".",",","'","❀",",","·","♦",",",".","·"];
+function drawGround(grid,gnd) {
+  for(let x=0;x<W;x++) grid[gnd][x]="=";
+  for(let x=0;x<W;x++){
+    const wx=x+player;
+    if(wx%4===0 && gnd+1<H){
+      grid[gnd+1][x]=DECO[((wx*7)%DECO.length+DECO.length)%DECO.length];
+    }
+  }
+}
+
+// ── LAMPADAIRES ────────────────────────────────────────────
+function drawLamps(grid,gnd) {
+  for(let i=-20;i<500;i+=18){
+    const wx=i-player+16;
+    if(wx>0&&wx<W){
+      grid[gnd-6][wx]="O";
+      grid[gnd-5][wx]="|"; grid[gnd-4][wx]="|"; grid[gnd-3][wx]="|";
+      if(wx-1>=0) grid[gnd-6][wx-1]="·";
+      if(wx+1<W)  grid[gnd-6][wx+1]="·";
+    }
+  }
+}
+
+// ── MAISON ─────────────────────────────────────────────────
+function drawHouse(grid,gnd) {
+  const hp=GOAL-player+28;
+  if(hp>0&&hp<W-16){
+    const h=[
+      "     /\\\\     ","    /  \\\\    ",
+      "   /____\\\\   ","  | [] [] |  ",
+      "  |      |   ","  |______|   "
     ];
-    for (let y = 0; y < end.length; y++) text(grid, 10, 1 + y, end[y]);
-    btnSpace.classList.remove('visible');
-    document.getElementById("screen").textContent = grid.map(r => r.join("")).join("\n");
+    for(let y=0;y<h.length;y++)
+      for(let x=0;x<h[y].length;x++)
+        if(hp+x>=0&&hp+x<W) grid[gnd-9+y][hp+x]=h[y][x];
+    tx(grid,hp,gnd-10,HOUSE);
+    const chimX=hp+10;
+    if(chimX<W){
+      tx(grid,chimX,gnd-11,"~");
+      if((Date.now()/450|0)%2===0&&chimX-1>=0) tx(grid,chimX-1,gnd-12,"~");
+    }
+  }
+}
+
+// ── HUD ────────────────────────────────────────────────────
+function drawHUD(grid) {
+  const pct=Math.min(100,Math.round(player/GOAL*100));
+  const bar="["+("█".repeat(Math.round(pct/100*18)))+"░".repeat(18-Math.round(pct/100*18))+"]";
+  tx(grid,1,1,`${pct}% ${bar} ${player}m`);
+}
+
+// ── CŒURS DOM ──────────────────────────────────────────────
+function spawnHeart() {
+  const h=document.createElement("div");
+  h.className="floating-heart"; h.textContent="❤️";
+  h.style.left=Math.random()*88+"vw";
+  h.style.bottom="90px";
+  document.body.appendChild(h);
+  setTimeout(()=>h.remove(),2300);
+}
+
+// ── MACHINE À ÉCRIRE ───────────────────────────────────────
+function typewrite(lines,el) {
+  el.style.display="block"; el.innerHTML="";
+  let li=0,ci=0;
+  function tick(){
+    if(li>=lines.length){el.innerHTML=el.innerHTML.replace(/▌$/,"");return;}
+    if(ci>=lines[li].length){el.innerHTML+="<br>";li++;ci=0;setTimeout(tick,350);return;}
+    el.innerHTML=el.innerHTML.replace(/▌$/,"")+lines[li][ci]+"▌";
+    ci++; setTimeout(tick,50);
+  }
+  tick();
+}
+
+// ── RENDU ──────────────────────────────────────────────────
+function render() {
+  const grid=mkgrid();
+  const gnd=H-4;
+
+  if(finalScene){
+    drawGround(grid,gnd);
+    put(grid,GIRL[0],14,gnd-2);
+    put(grid,BOY,boyX,gnd-2);
+    if(approachAnim&&boyX<=30){
+      const hrt=[" ♥♥♥   ♥♥♥","♥♥♥♥♥♥♥♥♥♥♥"," ♥♥♥♥♥♥♥♥♥","   ♥♥♥♥♥","    ♥♥♥","     ♥"];
+      for(let y=0;y<hrt.length;y++) tx(grid,29,5+y,hrt[y]);
+    }
+    tx(grid,1,1,"Il est là... ❤️");
+    document.getElementById("screen").textContent=grid.map(r=>r.join("")).join("\n");
     return;
   }
 
-  const ground = height - 4;
-  for (let x = 0; x < width; x++) grid[ground][x] = "=";
+  // Idle
+  idleTimer++;
+  if(idleTimer>40&&idleTimer%18===0) idleFrame=(idleFrame+1)%GIRL_IDLE.length;
 
-  for (let i = -20; i < 500; i += 18) {
-    const wx = i - player + 16;
-    if (wx > 0 && wx < width) {
-      grid[ground - 6][wx] = "O";
-      grid[ground - 5][wx] = "|";
-      grid[ground - 4][wx] = "|";
-      grid[ground - 3][wx] = "|";
-    }
-  }
+  applySky();
+  drawSky(grid);
+  drawClouds(grid);
+  drawGround(grid,gnd);
+  drawLamps(grid,gnd);
+  drawHouse(grid,gnd);
 
-  const housePos = goal - player + 28;
-  if (housePos > 0 && housePos < width - 16) {
-    const house = [
-      "     /\\\\     ",
-      "    /  \\\\    ",
-      "   /____\\\\   ",
-      "  | [] [] |  ",
-      "  |      |   ",
-      "  |______|   "
-    ];
-    for (let y = 0; y < house.length; y++)
-      for (let x = 0; x < house[y].length; x++)
-        grid[ground - 9 + y][housePos + x] = house[y][x];
-    text(grid, housePos, ground - 10, myHouse);
-  }
+  const sprite=idleTimer<6 ? GIRL[walkFrame%2] : GIRL_IDLE[idleFrame];
+  put(grid,sprite,14,gnd-2);
 
-  put(grid, walkFrame % 2 === 0 ? catGirl1 : catGirl2, 14, ground - 2);
-
-  if (player >= goal) {
-    put(grid, catBoy, 26, ground - 2);
-    text(grid, 16, 4, "❤️ Ton chéri est là ❤️");
-    text(grid, 18, 6, "Appuie sur le bouton !");
-    btnSpace.classList.add('visible');
+  if(player>=GOAL){
+    put(grid,BOY,35,gnd-2);
+    tx(grid,14,5,"❤️ Ton chéri est là ❤️");
+    tx(grid,18,7,"Appuie sur le bouton !");
+    document.getElementById("btn-space").classList.add("visible");
   } else {
-    btnSpace.classList.remove('visible');
+    document.getElementById("btn-space").classList.remove("visible");
   }
 
-  text(grid, 1, 1, `Dist: ${player}m / ${goal}m`);
-  document.getElementById("screen").textContent = grid.map(r => r.join("")).join("\n");
+  drawHUD(grid);
+  document.getElementById("screen").textContent=grid.map(r=>r.join("")).join("\n");
 }
 
-render();
+function loop() { render(); requestAnimationFrame(loop); }
+
+// ── CONTRÔLES ──────────────────────────────────────────────
+function moveRight(){ startMelody(); }
+function moveLeft(){
+  if(finalScene)return;
+  stopMelody();
+  player=Math.max(0,player-1); walkFrame++; idleTimer=0;
+}
+function doSpace(){
+  if(finalScene||player<GOAL)return;
+  finalScene=true; approachAnim=true; boyX=60;
+  document.getElementById("btn-space").classList.remove("visible");
+  playFinalJingle();
+  const iv=setInterval(()=>{
+    boyX--;
+    if(boyX<=28){
+      clearInterval(iv);
+      const rain=setInterval(spawnHeart,280);
+      setTimeout(()=>clearInterval(rain),5500);
+      setTimeout(()=>typewrite([
+        "Bonne journée la chérie ❤️",
+        "Bon courage pour aujourd'hui !",
+        "Bisoooooous <3"
+      ], document.getElementById("typewriter")), 700);
+    }
+  },40);
+}
+
+const BL=document.getElementById("btn-left");
+const BR=document.getElementById("btn-right");
+const BS=document.getElementById("btn-space");
+
+// Bouton DROITE : maintien = mélodie en boucle, relâche = stop
+BR.addEventListener("pointerdown", e=>{e.preventDefault(); moveRight();});
+BR.addEventListener("pointerup",   e=>{e.preventDefault(); stopMelody();});
+BR.addEventListener("pointerleave",e=>{e.preventDefault(); stopMelody();});
+BR.addEventListener("pointercancel",e=>{stopMelody();});
+
+// Bouton GAUCHE : recul simple à chaque appui (pas de mélodie)
+let holdLeft=null;
+BL.addEventListener("pointerdown",e=>{
+  e.preventDefault(); stopMelody(); moveLeft();
+  holdLeft=setInterval(moveLeft,150);
+});
+BL.addEventListener("pointerup",   ()=>{clearInterval(holdLeft);});
+BL.addEventListener("pointerleave",()=>{clearInterval(holdLeft);});
+
+BS.addEventListener("pointerdown",e=>{e.preventDefault();doSpace();});
+
+document.addEventListener("keydown",e=>{
+  if(finalScene)return;
+  if(e.key==="ArrowRight"){ startMelody(); }
+  if(e.key==="ArrowLeft") moveLeft();
+  if(e.code==="Space"&&player>=GOAL)doSpace();
+});
+document.addEventListener("keyup",e=>{
+  if(e.key==="ArrowRight") stopMelody();
+});
+
+// ── ARRIVÉE ────────────────────────────────────────────────
+let wasAtGoal=false;
+setInterval(()=>{
+  if(player>=GOAL&&!wasAtGoal&&!finalScene){
+    wasAtGoal=true; playArrival();
+  }
+},200);
+
+loop();
 </script>
 </body>
 </html>
